@@ -182,8 +182,6 @@ void eval(char *cmdline)
 
 
         if(!bg){ //foreground 
-            // add job to the job list(addjob fuction)
-            addjob(jobs, pid, FG, cmdline);
 
             if((pid=(waitpid(-1, &status, 0)))<0)// wait for child process to finish. but, error case is return -1
                 unix_error("waitpid error");
@@ -269,7 +267,7 @@ int builtin_cmd(char **argv)
     }
     else if(!strcmp(argv[0],"jobs")){ //return 0 if cmd is equal to "jobs"
         listjobs(jobs);
-        exit(0);
+        return 1;
     }
     else //if cmd isnt equal to anything
         return 0;     /* not a builtin command */
