@@ -168,12 +168,14 @@ void eval(char *cmdline)
     char *argv[MAXARGS]; //store command
     pid_t pid;// Process id
     int bg; // background job or foreground job?
-    int status; //process status val
+    //int status; //process status val
 
     bg=parseline(cmdline, argv); // parsing cmdline and store command at argv
     
     if(builtin_cmd(argv)!=1){
         if((pid=fork())==0){    //make child process
+            Signal(SIGINT, SIG_DFL);   //set default signal handler
+            Signal(SIGTSTP, SIG_DFL);  
             if(execve(argv[0], argv, environ)<0){ //return -1 if argv(cmdline) cant found
                 printf("%s:Command Not Found!\n",argv[0]);
                 exit(0);
@@ -182,9 +184,10 @@ void eval(char *cmdline)
 
 
         if(!bg){ //foreground 
-
-            if((pid=(waitpid(-1, &status, 0)))<0)// wait for child process to finish. but, error case is return -1
-                unix_error("waitpid error");
+            // add job to the job list(addjob fuction)
+            addjob(jobs, pid, FG, cmdline);
+            //printf("debug : fg job ID:[%d], pid:(%d), cmd:%s\n",pid2jid(pid),pid,cmdline);
+            pause();
         }
         else{ //background
             // add job to the job list(addjob fuction)
@@ -307,14 +310,19 @@ void sigchld_handler(int sig)
 {
     int status; // child proc status variable
     pid_t pid; //process ID
-    
-    while((pid=waitpid(-1,&status,0))>0){ //waiting child process terminated and return PID
+    //printf("debug : start sigchld\n");
+    if( (pid=waitpid(-1,&status,0)) < 0 )// wait for child process to finish. but, error case is return -1
+        unix_error("waitpid error");
+    else{
+        //printf("debug : Job ID:[%d] PID:(%d) ended in status %d\n",pid2jid(pid),pid, status);
         if(WIFSIGNALED(status)){//if child process be terminated by some signal, return true.
             //*WTERMSIG : signal number of signal that terminate child pordcess
             printf("Job ID:[%d] PID:(%d) terminated by signal %d\n",pid2jid(pid),pid,WTERMSIG(status));
-            deletejob(jobs,pid);//remove job
         }
+        //printf("debug : delete job\n");
+        deletejob(jobs,pid);//remove job
     }
+    //printf("debug : end sigchld\n");
     return;
 }
 
@@ -327,7 +335,12 @@ void sigint_handler(int sig)
 {
     pid_t pid; //process ID
     pid=fgpid(jobs);// current procss PID(fg process pid info from jobs func)
-    kill(pid, SIGINT); //sending signal SIGINT to pid(ctrl+c,interrupt)
+    //printf("debug : send pid %d sigint\n",pid);
+    if (pid>0){
+        kill(pid, SIGINT); //sending signal SIGINT to pid(ctrl+c,interrupt)
+        pause();
+    }
+
     return;
 }
 
