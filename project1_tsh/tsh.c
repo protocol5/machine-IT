@@ -281,10 +281,6 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
-    pid_t pid; //porc id
-    pid_t jid; //job id
-    struct job_t *job = 0; //job structure
-
     if(!strcmp(argv[0],"quit")){ //return 0 if cmd is equal to "quit"
         exit(0);
     }
@@ -292,41 +288,10 @@ int builtin_cmd(char **argv)
         listjobs(jobs);
         return 1; 
     }
-    /* BACKGORUND CMD */
-    else if(!strcmp(argv[0], "bg")){    //bg cmd
-        /* bg cmd store in argv[1][0], argv[1][0] has 2 case
-        / case 1 : % -> input job ID, case 2 : number-> pid*/
-        if(argv[1][0]=='%'){ //bg % (job ID)
-            jid = atoi(&argv[1][1]); //changing char to int (atoi)
-            job = getjobjid(jobs,jid); //get job id
-        }
-        else if(isdigit(argv[1][0])){   //bg pid
-            pid=atoi(argv[1]); //casting (char)pid to (int)pid
-            job=getjobpid(jobs, pid); //get pid 
-        }
-        //sending SIGCONT signal : if there were stopped process, this signal try to restart a stopped process
-        kill(-(job->pid),SIGCONT);  //-pid mean : sending sig to all of process of proc group
-        job->state = BG; //changing state ST to BG
-        printf("Job ID:[%d] pid:(%d) cmdline:%s\n",job->jid, job->pid, job->cmdline);
+    /* bgfg CMD function */
+    if((!strcmp(argv[0], "bg"))||(!strcmp(argv[0], "fg"))){ 
+        do_bgfg(argv); //call func
         return 1;
-    }
-    /* FOREGROUND CMD*/
-    else if(!strcmp(argv[0], "fg")){    //fg cmd
-        /* fg cmd store in argv[1][0], argv[1][0] has 2 case
-        / case 1 : % -> input job ID, case 2 : number-> pid*/
-        if(argv[1][0]=='%'){ //fg % (job ID)
-            jid = atoi(&argv[1][1]); //changing char to int (atoi)
-            job = getjobjid(jobs,jid); //get job id
-        }
-        else if(isdigit(argv[1][0])){   //fg pid
-            pid=atoi(argv[1]); //casting (char)pid to (int)pid
-            job=getjobpid(jobs, pid); //get pid 
-        }
-        //sending SIGCONT signal : if there were stopped process, this signal try to restart a stopped process
-        kill(-(job->pid),SIGCONT); //-pid mean : sending sig to all of process of proc group
-        job->state = FG; //changing state ST to FG
-        waitfg(job->pid);   //parents process waits for fg to terminate
-        return 1;        
     }
     else //if cmd isnt equal to anything
         return 0;     /* not a builtin command */
@@ -337,7 +302,34 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
-    return;
+    pid_t pid; //porc id
+    pid_t jid; //job id
+    struct job_t *job = 0; //job structure
+
+    /* bgfg cmd store in argv[1][0], argv[1][0] has 2 case
+    / case 1 : % -> input job ID, case 2 : number-> pid*/
+    if(argv[1][0]=='%'){ //bg % (job ID)
+        jid = atoi(&argv[1][1]); //changing char to int (atoi)
+        job = getjobjid(jobs,jid); //get job id
+        
+    }
+    else if(isdigit(argv[1][0])){   //bg or fg pid
+        pid=atoi(argv[1]); //casting (char)pid to (int)pid
+        job=getjobpid(jobs, pid); //get pid 
+    }
+    //sending SIGCONT signal : if there were stopped process, this signal try to restart a stopped process
+    kill(-(job->pid),SIGCONT);  //-pid mean : sending sig to all of process of proc group
+    
+    /*BG cmd*/
+    if(!strcmp(argv[0], "bg")){
+        job->state = BG; //changing state ST to BG
+        printf("Job ID:[%d] pid:(%d) cmdline:%s\n",job->jid, job->pid, job->cmdline);
+    }
+    /* FOREGROUND CMD*/
+    if(!strcmp(argv[0], "fg")){
+        job->state = FG; //changing state ST to FG
+        waitfg(job->pid);   //parents process waits for fg to terminate 
+    }
 }
 
 /* 
