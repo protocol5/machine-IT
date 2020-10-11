@@ -128,6 +128,7 @@ int main(int argc, char **argv)
     /* Initialize the job list */
     initjobs(jobs);
 
+
     /* Execute the shell's read/eval loop */
     while (1) {
 
@@ -166,38 +167,54 @@ int main(int argc, char **argv)
 void eval(char *cmdline) 
 {
     char *argv[MAXARGS]; //store command
-    pid_t pid;// Process id
+    pid_t pid=0;// Process id
     int bg; // background job or foreground job?
-    //int status; //process status val
+    sigset_t mask; //blocking signal
+
 
     bg=parseline(cmdline, argv); // parsing cmdline and store command at argv
     
     if(builtin_cmd(argv)!=1){
+
+        // sig blocking for avoiding race
+        sigemptyset(&mask); //sig set init
+        sigaddset(&mask, SIGCHLD);  //input SIGCHLD in signal set
+        sigprocmask(SIG_BLOCK, &mask, NULL);
+
         if((pid=fork())==0){    //make child process
-            Signal(SIGINT, SIG_DFL);   //set default signal handler
-            Signal(SIGTSTP, SIG_DFL);  
+            //Signal(SIGINT, SIG_DFL);   //set default signal handler
+            //Signal(SIGTSTP, SIG_DFL);
+            sigprocmask(SIG_UNBLOCK,&mask, NULL);
+            setpgid(0,0);//process group 
             if(execve(argv[0], argv, environ)<0){ //return -1 if argv(cmdline) cant found
                 printf("%s:Command Not Found!\n",argv[0]);
                 exit(0);
             }
         }
+        // parent process add job first
+        else{
+            if(bg==1)   //background
+                // add job to the job list(addjob fuction)
+                addjob(jobs, pid, BG, cmdline);
+            else{   //foreground
+                // add job to the job list(addjob fuction)
+                addjob(jobs, pid, FG, cmdline);
+            }
+            sigprocmask(SIG_UNBLOCK, &mask, NULL);
 
-
-        if(!bg){ //foreground 
-            // add job to the job list(addjob fuction)
-            addjob(jobs, pid, FG, cmdline);
-            //printf("debug : fg job ID:[%d], pid:(%d), cmd:%s\n",pid2jid(pid),pid,cmdline);
-            pause();
-        }
-        else{ //background
-            // add job to the job list(addjob fuction)
-            addjob(jobs, pid, BG, cmdline);
-
-            //pid2jid: mappping proc ID(pid) to Job ID(1,2,..16)
-            //print pid num, cmdline
-            printf("job ID:[%d], pid:(%d), cmd:%s\n",pid2jid(pid),pid,cmdline);
+            if(bg==1){ //background
+                //pid2jid: mappping proc ID(pid) to Job ID(1,2,..16)
+                //print pid num, cmdline
+                printf("job ID:[%d], pid:(%d), cmd:%s\n",pid2jid(pid),pid,cmdline);
+            }
+            else{ //foreground 
+                waitfg(pid);//wait for fg
+                //printf("debug : fg job ID:[%d], pid:(%d), cmd:%s\n",pid2jid(pid),pid,cmdline);
+                //pause();
+            }
         }
     }
+    
     return;
 }
 
@@ -264,6 +281,9 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+    pid_t pid; //porc id
+    pid_t jid; //job id
+    struct job_t *job = 0; //job structure
 
     if(!strcmp(argv[0],"quit")){ //return 0 if cmd is equal to "quit"
         exit(0);
@@ -271,6 +291,42 @@ int builtin_cmd(char **argv)
     else if(!strcmp(argv[0],"jobs")){ //return 0 if cmd is equal to "jobs"
         listjobs(jobs);
         return 1;
+    }
+    /* BACKGORUND CMD */
+    else if(!strcmp(argv[0], "bg")){    //bg cmd
+        /* bg cmd store in argv[1][0], argv[1][0] has 2 case
+        / case 1 : % -> input job ID, case 2 : number-> pid*/
+        if(argv[1][0]=='%'){ //bg % (job ID)
+            jid = atoi(&argv[1][1]); //changing char to int (atoi)
+            job = getjobjid(jobs,jid); //get job id
+        }
+        else if(isdigit(argv[1][0])){   //bg pid
+            pid=atoi(argv[1]); //casting (char)pid to (int)pid
+            job=getjobpid(jobs, pid); //get pid 
+        }
+        //sending SIGCONT signal : if there were stopped process, this signal try to restart a stopped process
+        kill(-(job->pid),SIGCONT);  //-pid mean : sending sig to all of process of proc group
+        job->state = BG; //changing state ST to BG
+        printf("Job ID:[%d] pid:(%d) cmdline:%s\n",job->jid, job->pid, job->cmdline);
+        return 1;
+    }
+    /* FOREGROUND CMD*/
+    else if(!strcmp(argv[0], "fg")){    //fg cmd
+        /* fg cmd store in argv[1][0], argv[1][0] has 2 case
+        / case 1 : % -> input job ID, case 2 : number-> pid*/
+        if(argv[1][0]=='%'){ //fg % (job ID)
+            jid = atoi(&argv[1][1]); //changing char to int (atoi)
+            job = getjobjid(jobs,jid); //get job id
+        }
+        else if(isdigit(argv[1][0])){   //fg pid
+            pid=atoi(argv[1]); //casting (char)pid to (int)pid
+            job=getjobpid(jobs, pid); //get pid 
+        }
+        //sending SIGCONT signal : if there were stopped process, this signal try to restart a stopped process
+        kill(-(job->pid),SIGCONT); //-pid mean : sending sig to all of process of proc group
+        job->state = FG; //changing state ST to FG
+        waitfg(job->pid);   //parents process waits for fg to terminate
+        return 1;        
     }
     else //if cmd isnt equal to anything
         return 0;     /* not a builtin command */
@@ -289,8 +345,12 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
-    struct job_t *job = getjobpid(jobs,pid);//find jobs pid
-    while((job->pid==pid)&&(job->state==FG))
+    struct job_t *job;
+    job = getjobpid(jobs,pid);//find jobs pid
+
+    if(!job) //FG job hes completed
+        return;
+    while((job!=NULL)&&(job->state==FG))
         sleep(1);
     return;
 }
@@ -308,19 +368,39 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
-    int status; // child proc status variable
+    struct job_t *job ;
+    int status = -1; // child proc status variable
     pid_t pid; //process ID
+    
     //printf("debug : start sigchld\n");
-    if( (pid=waitpid(-1,&status,0)) < 0 )// wait for child process to finish. but, error case is return -1
-        unix_error("waitpid error");
-    else{
+
+    //if( (pid=waitpid(-1,&status,0)) < 0 )// wait for child process to finish. but, error case is return -1
+      //  unix_error("waitpid error");
+    while((pid=waitpid(-1,&status,WNOHANG|WUNTRACED)) > 0 ){// while : cause pending signal(only 2 signal receive)
         //printf("debug : Job ID:[%d] PID:(%d) ended in status %d\n",pid2jid(pid),pid, status);
+        job = getjobpid(jobs,pid);//find jobs pid
+
         if(WIFSIGNALED(status)){//if child process be terminated by some signal, return true.
-            //*WTERMSIG : signal number of signal that terminate child pordcess
+            //printf("debug : interrupt ok\n");
+            
+            //*WTERMSIG : signal number of signal that terminate child process
             printf("Job ID:[%d] PID:(%d) terminated by signal %d\n",pid2jid(pid),pid,WTERMSIG(status));
+            
+            //printf("debug : delete job\n");
+            deletejob(jobs,pid);//remove job
         }
-        //printf("debug : delete job\n");
-        deletejob(jobs,pid);//remove job
+        else if(WIFSTOPPED(status)){//if child procees be stopped by signal, return true.
+            job->state=ST; // changing job state to Stop(ST) 
+            //printf("debug ****Job is %d \n",job->state);
+            //*WSTOPSIG : return signal number of signal that stop child process 
+            printf("Job ID:[%d] PID:(%d) stopped by signal %d\n",pid2jid(pid),pid,WSTOPSIG(status));
+        }
+        else if(WIFEXITED(status)){ //child porcess termnaed well. 
+                                    //this sig macro must use to aovide infinite loop.
+            //exited
+            deletejob(jobs,pid);
+        }
+
     }
     //printf("debug : end sigchld\n");
     return;
@@ -337,8 +417,10 @@ void sigint_handler(int sig)
     pid=fgpid(jobs);// current procss PID(fg process pid info from jobs func)
     //printf("debug : send pid %d sigint\n",pid);
     if (pid>0){
-        kill(pid, SIGINT); //sending signal SIGINT to pid(ctrl+c,interrupt)
-        pause();
+        kill(-pid, SIGINT); //sending signal SIGINT to pid(ctrl+c,interrupt)
+                            //-pid mean : sending sig to all of process of proc group
+
+        //pause(); //wait till reciving signal
     }
 
     return;
@@ -351,6 +433,10 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
+    pid_t pid;//process ID
+    pid=fgpid(jobs); //get current process PID (fg process pid info from jobs func)
+    kill(-pid, SIGTSTP); //sending signal SIGTSTP to pid(ctrl+z)
+    //pause(); //wait till reciving signal
     return;
 }
 
