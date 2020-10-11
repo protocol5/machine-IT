@@ -290,7 +290,7 @@ int builtin_cmd(char **argv)
     }
     else if(!strcmp(argv[0],"jobs")){ //return 0 if cmd is equal to "jobs"
         listjobs(jobs);
-        return 1;
+        return 1; 
     }
     /* BACKGORUND CMD */
     else if(!strcmp(argv[0], "bg")){    //bg cmd
@@ -436,6 +436,7 @@ void sigtstp_handler(int sig)
     pid_t pid;//process ID
     pid=fgpid(jobs); //get current process PID (fg process pid info from jobs func)
     kill(-pid, SIGTSTP); //sending signal SIGTSTP to pid(ctrl+z)
+                         //-pid mean : sending sig to all of process of proc group
     //pause(); //wait till reciving signal
     return;
 }
