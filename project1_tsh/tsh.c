@@ -187,7 +187,7 @@ void eval(char *cmdline)
             sigprocmask(SIG_UNBLOCK,&mask, NULL);
             setpgid(0,0);//process group 
             if(execve(argv[0], argv, environ)<0){ //return -1 if argv(cmdline) cant found
-                printf("%s:Command Not Found!\n",argv[0]);
+                printf("%s:Command not found\n",argv[0]);
                 exit(0);
             }
         }
@@ -205,7 +205,7 @@ void eval(char *cmdline)
             if(bg==1){ //background
                 //pid2jid: mappping proc ID(pid) to Job ID(1,2,..16)
                 //print pid num, cmdline
-                printf("job ID:[%d], pid:(%d), cmd:%s\n",pid2jid(pid),pid,cmdline);
+                printf("[%d], (%d), %s",pid2jid(pid),pid,cmdline);
             }
             else{ //foreground 
                 waitfg(pid);//wait for fg
@@ -306,16 +306,38 @@ void do_bgfg(char **argv)
     pid_t jid; //job id
     struct job_t *job = 0; //job structure
 
+    //trace 14, check argv[1] 
+    if(argv[1]==NULL){
+        printf("%s command requires PID or %%jobid argument\n",argv[0]);
+        return ;
+    }
+
     /* bgfg cmd store in argv[1][0], argv[1][0] has 2 case
     / case 1 : % -> input job ID, case 2 : number-> pid*/
     if(argv[1][0]=='%'){ //bg % (job ID)
         jid = atoi(&argv[1][1]); //changing char to int (atoi)
         job = getjobjid(jobs,jid); //get job id
+
+        //trace14, if % jobID arg no exist
+        if(job==NULL){
+            printf("%s: No such job\n",argv[1]);
+            return ;
+        }
         
     }
     else if(isdigit(argv[1][0])){   //bg or fg pid
         pid=atoi(argv[1]); //casting (char)pid to (int)pid
         job=getjobpid(jobs, pid); //get pid 
+
+        //trace14, if pid argument no exist
+        if(job==NULL){
+            printf("(%d): No such process\n", pid);
+            return;
+        }
+    }
+    else{ //trace14, check argv[1][0]
+        printf("%s: argument must be a PID or %%jobid \n",argv[0]);
+        return ;
     }
     //sending SIGCONT signal : if there were stopped process, this signal try to restart a stopped process
     kill(-(job->pid),SIGCONT);  //-pid mean : sending sig to all of process of proc group
@@ -323,7 +345,7 @@ void do_bgfg(char **argv)
     /*BG cmd*/
     if(!strcmp(argv[0], "bg")){
         job->state = BG; //changing state ST to BG
-        printf("Job ID:[%d] pid:(%d) cmdline:%s\n",job->jid, job->pid, job->cmdline);
+        printf("[%d] (%d) %s\n",job->jid, job->pid, job->cmdline);
     }
     /* FOREGROUND CMD*/
     if(!strcmp(argv[0], "fg")){
@@ -376,7 +398,7 @@ void sigchld_handler(int sig)
             //printf("debug : interrupt ok\n");
             
             //*WTERMSIG : signal number of signal that terminate child process
-            printf("Job ID:[%d] PID:(%d) terminated by signal %d\n",pid2jid(pid),pid,WTERMSIG(status));
+            printf("Job [%d] (%d) terminated by signal %d\n",pid2jid(pid),pid,WTERMSIG(status));
             
             //printf("debug : delete job\n");
             deletejob(jobs,pid);//remove job
@@ -385,7 +407,7 @@ void sigchld_handler(int sig)
             job->state=ST; // changing job state to Stop(ST) 
             //printf("debug ****Job is %d \n",job->state);
             //*WSTOPSIG : return signal number of signal that stop child process 
-            printf("Job ID:[%d] PID:(%d) stopped by signal %d\n",pid2jid(pid),pid,WSTOPSIG(status));
+            printf("Job [%d] (%d) stopped by signal %d\n",pid2jid(pid),pid,WSTOPSIG(status));
         }
         else if(WIFEXITED(status)){ //child porcess termnaed well. 
                                     //this sig macro must use to aovide infinite loop.
