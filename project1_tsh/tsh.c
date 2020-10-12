@@ -2,6 +2,8 @@
  * tsh - A tiny shell program with job control
  * 
  * <Put your name and login ID here>
+ * 2014430024 ojk
+ * 2014430021 syh
  */
 #include <stdio.h>
 #include <stdlib.h>
