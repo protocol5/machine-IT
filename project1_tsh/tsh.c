@@ -173,7 +173,9 @@ void eval(char *cmdline)
 
 
     bg=parseline(cmdline, argv); // parsing cmdline and store command at argv
-    
+
+    if(!(*argv)) return;    // case when argv is null.
+
     if(builtin_cmd(argv)!=1){
 
         // sig blocking for avoiding race
