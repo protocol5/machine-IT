@@ -15,10 +15,12 @@
 
 FILE *file_log; //for proxy.log filess
 
+//structure for passing on arguments to peer threads
 typedef struct connaddr_{
     int connf;
     struct sockaddr_in addre;
 }connaddr;
+
 /*
  * Function prototypes
  */
@@ -27,7 +29,8 @@ void format_log_entry(char *logstring, struct sockaddr_in *sockaddr, char *uri, 
 void *thread(void *vargp);
 void proxy(int connfd,struct sockaddr_in *sockaddr);
 void read_requesthdrs(rio_t *rp);
-
+//SIGPIPE signal hander func
+//Use when the socket is disconnected
 void sigpipe_handler(int sig) {
     printf("SIGPIPE handled\n");
     return;
@@ -37,10 +40,9 @@ void sigpipe_handler(int sig) {
  * main - Main routine for the proxy program 
  */
 int main(int argc, char **argv){
-    int listenfd, connfdp, port; //descriptors
+    int listenfd, connfdp; //descriptors
     socklen_t clientlen;
     struct sockaddr_in clientaddr; //client address 
-    char hostname[MAXLINE];
     pthread_t tid;
     connaddr *Connaddr;
     /* Check arguments */
@@ -50,14 +52,14 @@ int main(int argc, char **argv){
     }
 
     Signal(SIGPIPE, sigpipe_handler);
-    int portnum =atoi(argv[1]);
+    int portnum =atoi(argv[1]); //change string type to integer type
     listenfd=open_listenfd(portnum); //waiting connect socket
 
     file_log=fopen("proxy.log","a");
 
     while (1){
         clientlen=sizeof(struct sockaddr_in); //size of client address
-        Connaddr=malloc(sizeof(connaddr));
+        Connaddr=malloc(sizeof(connaddr)); //memory allocation
         connfdp=accept(listenfd, (SA *)&clientaddr, &clientlen); // connect socket
         Connaddr->connf=connfdp;// descriptor
         Connaddr->addre=clientaddr; // address
@@ -68,23 +70,25 @@ int main(int argc, char **argv){
 
 /* thread - peer threads*/
 void *thread(void *vargp){
-    //int connfd= *((int *)vargp);
     connaddr *Connaddr =(connaddr*)vargp;
     int connfd= Connaddr->connf;
     struct sockaddr_in sockaddr = Connaddr->addre;
     pthread_detach(pthread_self()); //reap thread
-    free(vargp);
-    Signal(SIGPIPE, sigpipe_handler);
+    free(vargp); // memory free (to avoid memory leak)
+    Signal(SIGPIPE, sigpipe_handler); //signal for disconnection socket
     proxy(connfd, &sockaddr); //read, write service
-    close(connfd);
+    close(connfd);// close descriptor
     return NULL;
 }
 
 /* proxy service */
 void proxy(int connfd, struct sockaddr_in *sockaddr){
-    char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Encoding: gzip, deflate\r\nConnection: close\r\nProxy-Connection: close\r\n\r\n";
+    //user
+    char *Headers = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Encoding: gzip, deflate\r\nConnection: close\r\nProxy-Connection: close\r\n\r\n";
+    
     size_t n; //long unsigned int, for while
-    size_t sum=0;
+    size_t sum=0; //count for write
+
     int clientfd; //descriptor
     int port;
     char host[MAXLINE],uri[MAXLINE],buf[MAXLINE], buf2[MAXLINE], payload[MAXLINE];
@@ -92,43 +96,46 @@ void proxy(int connfd, struct sockaddr_in *sockaddr){
     char log_entry[MAXLINE];
     rio_t rio, rio_client;
 
-    /*read prart*/
-    Rio_readinitb(&rio, connfd);
-    Rio_readlineb(&rio ,buf,MAXLINE);
+    /*reading part*/
+    Rio_readinitb(&rio,connfd); //init:change integer fd to structure
+    Rio_readlineb(&rio,buf,MAXLINE);//read fd and storage to buf
     printf("Request headers:\n");
-    printf("%s\n", buf);
+    printf("%s\n", buf);//print request header 
 
-    printf("----------------\n");
     
     if (strcmp(buf, "") == 0) //buf check. if buf==NULL, return.
         return;
 
     sscanf(buf,"%s %s %s", method, uri, version);
 
-    read_requesthdrs(&rio);
-
+    read_requesthdrs(&rio);//Detailed description above function
 
     parse_uri(uri, host, path, &port);
 
-    //print information 
+    //print information (uri, host, port, path)
     printf("----------* information *-----------\n");
     printf("uri = \"%s\"\n", uri);
     printf("host = \"%s\", ", host);
-    printf("port = \"%d\", ", port);
+    printf("port = \"%d\", ", port); //http's default port 80
     printf("path = \"%s\"\n", path);
     printf("---------* information end*---------\n");
     
-
+    
+    //Request connection with web server using host and port number.
     clientfd = open_clientfd(host, port);
-    Rio_readinitb(&rio_client, clientfd);
+    Rio_readinitb(&rio_client, clientfd);// init (change to integer fd to structure)
 
+    //store informations(path, ver, method...) in buf2
     sprintf(buf2, "GET %s HTTP/1.0\r\n", path);
     write(clientfd, buf2, strlen(buf2));
 	sprintf(buf2, "Host: %s\r\n", host);
     rio_writen(clientfd, buf2, strlen(buf2));
-    write(clientfd, user_agent_hdr, strlen(user_agent_hdr));
+    //Header has a http standard text line
+    //and write on clientfd
+    write(clientfd, Headers, strlen(Headers));
 
-
+    //read client fd and storage to buffer 2
+    //copy buf2's string to playload buffer, and write
     strcpy(payload, "");
     while ((n = rio_readlineb(&rio_client, buf2, MAXLINE)) != 0) {    
         sum += n;
@@ -150,7 +157,9 @@ void proxy(int connfd, struct sockaddr_in *sockaddr){
  *  
  * Read the header and ignore the connection request.
  * 
- * Read the string in the 'buf' up to "\r\n".
+ * Read the string in the 'buf' up to "\r\n". 
+ * because the http standard ends with carriage return and line feed characters.
+ * 
  */
 
 void read_requesthdrs(rio_t *rp)
