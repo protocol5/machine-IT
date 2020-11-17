@@ -15,6 +15,8 @@
 
 FILE *file_log; //for proxy.log filess
 
+pthread_mutex_t mutex_lock; //make mutex
+
 //structure for passing on arguments to peer threads
 typedef struct connaddr_{
     int connf;
@@ -50,6 +52,8 @@ int main(int argc, char **argv){
 	fprintf(stderr, "Usage: %s <port number>\n", argv[0]);
 	exit(0);
     }
+
+    pthread_mutex_init(&mutex_lock,NULL); //init mutex
 
     Signal(SIGPIPE, sigpipe_handler);
     int portnum =atoi(argv[1]); //change string type to integer type
@@ -146,8 +150,13 @@ void proxy(int connfd, struct sockaddr_in *sockaddr){
 
     // Call function that stores log
     format_log_entry(log_entry,sockaddr,uri,n);
+
+    pthread_mutex_lock(&mutex_lock);
+
     fprintf(file_log, "%s %d\n", log_entry, n);
     fflush(file_log);
+
+    pthread_mutex_unlock(&mutex_lock);
 
     close(clientfd);// block the memory leak
 }
